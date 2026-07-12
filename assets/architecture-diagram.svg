@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1"><stop stop-color="#10100e"/><stop offset="1" stop-color="#211e15"/></linearGradient>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#d7bd82"/></marker>
+    <style>.title{font:700 40px Arial;fill:#f3eddb}.sub{font:400 20px Arial;fill:#aaa596}.box{fill:#25241f;stroke:#4b493e;stroke-width:2;rx:20}.label{font:700 23px Arial;fill:#f3eddb}.small{font:400 17px Arial;fill:#aaa596}.line{stroke:#d7bd82;stroke-width:4;fill:none;marker-end:url(#arrow)}.dot{fill:#d7bd82}</style>
+  </defs>
+  <rect width="1600" height="900" fill="url(#bg)"/>
+  <text x="80" y="80" class="title">Zoom live giveaway</text>
+  <text x="80" y="118" class="sub">Registered + present + not staff → locked sheet → public random number</text>
+  <rect x="80" y="205" width="285" height="160" class="box"/><circle cx="118" cy="248" r="11" class="dot"/><text x="145" y="257" class="label">Registration</text><text x="115" y="305" class="small">Personal Zoom link</text><text x="115" y="334" class="small">Permanent serial</text>
+  <rect x="455" y="205" width="285" height="160" class="box"/><circle cx="493" cy="248" r="11" class="dot"/><text x="520" y="257" class="label">Live attendance</text><text x="490" y="305" class="small">Verified join / leave events</text><text x="490" y="334" class="small">Staff and session tracking</text>
+  <rect x="830" y="205" width="285" height="160" class="box"/><circle cx="868" cy="248" r="11" class="dot"/><text x="895" y="257" class="label">Immutable lock</text><text x="865" y="305" class="small">One meeting UUID</text><text x="865" y="334" class="small">Draw numbers 1 to N</text>
+  <rect x="1205" y="205" width="285" height="160" class="box"/><circle cx="1243" cy="248" r="11" class="dot"/><text x="1270" y="257" class="label">Google Sheet</text><text x="1240" y="305" class="small">Protected visible list</text><text x="1240" y="334" class="small">Masked attendee data</text>
+  <path d="M365 285 H445" class="line"/><path d="M740 285 H820" class="line"/><path d="M1115 285 H1195" class="line"/>
+  <rect x="285" y="525" width="390" height="190" class="box"/><text x="325" y="580" class="label">Supabase Postgres</text><text x="325" y="625" class="small">Entrants · events · sessions · staff</text><text x="325" y="655" class="small">duplicate protection · locked snapshots</text>
+  <rect x="925" y="525" width="390" height="190" class="box"/><text x="965" y="580" class="label">Private control page</text><text x="965" y="625" class="small">Live counts · lock button</text><text x="965" y="655" class="small">Final range · sheet link</text>
+  <path d="M600 365 C600 435 520 455 500 515" class="line"/><path d="M975 365 C975 435 1070 455 1090 515" class="line"/><path d="M675 620 H915" class="line"/>
+  <text x="80" y="835" class="sub">The automation qualifies the list. The creator still selects the winner publicly.</text>
+</svg>

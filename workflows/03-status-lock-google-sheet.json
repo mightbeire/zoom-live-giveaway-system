@@ -1,0 +1,1293 @@
+{
+  "name": "03 — Zoom Giveaway Status + Lock + Google Sheet",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 03 — Live status, immutable lock, and transparent Google Sheet\n\nThe database—not Google Sheets—decides eligibility. Locking is atomic and repeat-safe. Google Sheets is created only after the database snapshot exists, then used as the human-readable list beside the creator's browser RNG.\n\nThe manual demo branches use the same production lock and sheet-creation logic.",
+        "height": 420,
+        "width": 760,
+        "color": 5
+      },
+      "id": "8aa84811-0cd4-5c4d-b0ef-60e31a5e76d9",
+      "name": "WF3 README",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1320,
+        -820
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Fill these credentials\n\n1. **Postgres:** same Supabase pooled connection used in Workflows 1 and 2.\n2. **Google Sheets OAuth2:** same credential in `Create Locked Spreadsheet`, `Append Eligible Rows`, and `Protect & Format Spreadsheet`.\n3. **Header Auth:** same credential in both dashboard webhooks. The future webpage sends this header.\n\nNo spreadsheet ID is required—the workflow creates a fresh locked spreadsheet automatically.",
+        "height": 420,
+        "width": 760,
+        "color": 3
+      },
+      "id": "55900003-baa5-5b3b-9afb-30260d59072a",
+      "name": "WF3 Credentials",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -440,
+        -820
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "GET",
+        "path": "zoom-giveaway/status",
+        "responseMode": "responseNode",
+        "options": {},
+        "authentication": "headerAuth"
+      },
+      "id": "eb12b0b7-559d-5236-aa22-dae587960c53",
+      "name": "Live Status Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1240,
+        -280
+      ],
+      "webhookId": "73c6add8-cb88-525d-bd6c-d4589c9d75b4"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "be654aea-79a8-55f2-b831-7c0ef6169fbf",
+              "name": "meetingId",
+              "value": "={{String($json.query?.meetingId??\"\")}}",
+              "type": "string"
+            },
+            {
+              "id": "79abdf05-0152-5837-8e47-c76302ecb72c",
+              "name": "meetingUuid",
+              "value": "={{String($json.query?.meetingUuid??\"\")}}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      },
+      "id": "16756406-3a25-51f6-88a3-344da9968eb0",
+      "name": "Normalize Status Request",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -980,
+        -280
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT public.api_get_status($1::jsonb) AS result;",
+        "options": {
+          "queryBatching": "single",
+          "largeNumbersOutput": "text",
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "id": "70cf2683-aff3-5b05-a6af-4842e55c8ddb",
+      "name": "Get Live Status — Webhook",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -720,
+        -280
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{json:$json.result ?? $json}];"
+      },
+      "id": "e5fc107d-ec93-55f3-9083-ac776cb9a758",
+      "name": "Unwrap Live Status — Webhook",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -460,
+        -280
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "6b574c08-7a2a-5144-a5e0-3e39af524255",
+      "name": "Return Live Status",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -200,
+        -280
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "84247f95-17f4-50e3-ad23-dcbf4538e299",
+      "name": "DEMO — Check Live Status",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1240,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "05d02ebe-0a32-5029-bb3f-7ce61c19280b",
+              "name": "meetingId",
+              "value": "DEMO-MEETING-001",
+              "type": "string"
+            },
+            {
+              "id": "d6fefbc8-cd36-5a4d-a4a0-511bbd1b42b9",
+              "name": "meetingUuid",
+              "value": "demo-live-001",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      },
+      "id": "ab6610e9-11e1-5810-95db-fde5ed84603f",
+      "name": "Demo Status Request",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -980,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT public.api_get_status($1::jsonb) AS result;",
+        "options": {
+          "queryBatching": "single",
+          "largeNumbersOutput": "text",
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "id": "7e48f561-78a7-5621-be3b-8834771b738a",
+      "name": "Get Live Status — Demo",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -720,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{json:$json.result ?? $json}];"
+      },
+      "id": "23bb27bb-0835-5412-ada4-676ddfa98dd0",
+      "name": "Show Demo Live Status",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -460,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "zoom-giveaway/lock",
+        "responseMode": "responseNode",
+        "options": {},
+        "authentication": "headerAuth"
+      },
+      "id": "bdc72c7e-49d7-594d-ae7e-33d79e245c4d",
+      "name": "Lock Giveaway Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1240,
+        220
+      ],
+      "webhookId": "56f26f7f-cb26-5f87-8d7a-102ad318966d"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "46104a77-f35d-5245-b95c-7909fd1ae0ff",
+              "name": "meetingId",
+              "value": "={{String($json.body?.meetingId??\"\")}}",
+              "type": "string"
+            },
+            {
+              "id": "86e15d05-a5c9-5cd5-ae87-4afe14f3f033",
+              "name": "meetingUuid",
+              "value": "={{String($json.body?.meetingUuid??\"\")}}",
+              "type": "string"
+            },
+            {
+              "id": "dc116bf9-08dc-5f4a-9c85-e00022857a6a",
+              "name": "requestedBy",
+              "value": "={{String($json.body?.requestedBy??\"creator-dashboard\")}}",
+              "type": "string"
+            },
+            {
+              "id": "1d23392b-40a9-5931-aa2d-657ca0616d82",
+              "name": "source",
+              "value": "webhook",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      },
+      "id": "9c98d6f9-3d02-5900-8d7d-f08b548ecdd2",
+      "name": "Normalize Lock Request",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -980,
+        220
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "f025569b-832b-5bf0-9a5f-5d9b77cf8269",
+      "name": "DEMO — Lock & Create Google Sheet",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1240,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "025fe830-b28a-5707-871d-9bb3fdcfa286",
+              "name": "meetingId",
+              "value": "DEMO-MEETING-001",
+              "type": "string"
+            },
+            {
+              "id": "44d02321-86c9-5eb3-9e8d-fb098125b522",
+              "name": "meetingUuid",
+              "value": "demo-live-001",
+              "type": "string"
+            },
+            {
+              "id": "d1b88ca7-43a1-5d11-8eaf-83aae7b1bace",
+              "name": "requestedBy",
+              "value": "n8n-demo",
+              "type": "string"
+            },
+            {
+              "id": "7dc34f8e-9801-5b36-8a4f-9afc0c8b55ba",
+              "name": "source",
+              "value": "manual",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      },
+      "id": "df4d73d8-6354-55b7-afb7-807e8eb4c4c0",
+      "name": "Demo Lock Request",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -980,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT public.api_lock_giveaway($1::jsonb) AS result, ($1::jsonb->>'source') AS source;",
+        "options": {
+          "queryBatching": "single",
+          "largeNumbersOutput": "text",
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "id": "7086f96a-ab33-5201-9068-584cf0d39ebd",
+      "name": "Create or Get Immutable Snapshot",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -700,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{json:{...($json.result??{}),source:$json.source??\"manual\"}}];"
+      },
+      "id": "8bf8795c-e0c7-5fda-84b8-f0954968538e",
+      "name": "Unwrap Lock Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -440,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "2e9978b8-38b1-505c-a698-be842e6a2797",
+              "leftValue": "={{Boolean($json.ok)}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "1873c5f3-0dff-5f96-a84f-6f3404761b05",
+      "name": "Lock Ready?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -180,
+        320
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{json:{ok:false,error:$json.error??\"The giveaway could not be locked.\",source:$json.source}}];"
+      },
+      "id": "1e31be85-a7a7-5179-a9b3-561758a0cc48",
+      "name": "Format Lock Error",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        80,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "26054542-e24c-5902-9548-e5d530bf18da",
+              "leftValue": "={{$json.source === \"webhook\"}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c2f3f12a-b074-5b73-b713-fb360f0ea3df",
+      "name": "Lock Error Came From Webhook?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        340,
+        500
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {
+          "responseCode": 409,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "86c96674-1a4a-50ff-8cc4-5a142f3599c6",
+      "name": "Return Lock Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        600,
+        440
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "25cb6aab-11c5-5f66-b347-0fca8fe4c589",
+      "name": "Show Manual Lock Error",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        600,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "6c970fe0-8f97-5c9d-8be6-85feaff2a741",
+              "leftValue": "={{Boolean($json.sheetUrl)}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "66538f9f-3649-594a-81e3-a1d4daad8543",
+      "name": "Spreadsheet Already Attached?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        80,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{json:{ok:true,alreadyLocked:true,lockId:$json.lockId,lockedAt:$json.lockedAt,eligibleCount:Number($json.eligibleCount??0),rng:{min:1,max:Number($json.eligibleCount??0)},instruction:`Use random-number range 1 to ${Number($json.eligibleCount??0)}.`,sheetTitle:$json.sheetTitle,sheetUrl:$json.sheetUrl,source:$json.source}}];"
+      },
+      "id": "9dcc9077-b866-5bcb-9248-64dd35decbfc",
+      "name": "Format Existing Locked Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        340,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "72d2ca86-0220-5ba6-a75b-9f62ebcd3b6b",
+              "leftValue": "={{$json.source === \"webhook\"}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "b6c4d0be-f164-5532-8451-ba24c8086d17",
+      "name": "Existing Result Came From Webhook?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        600,
+        140
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "2f06fcd6-904f-5c2d-93a1-c887c368f7de",
+      "name": "Return Existing Locked Sheet",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        860,
+        80
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "68f2a35d-98a1-5ca8-9688-bb1ed4d07a04",
+      "name": "Show Existing Manual Result",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        860,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const stamp=new Date($json.lockedAt??Date.now()).toISOString().replace(/[:.]/g,'-').slice(0,19);\nreturn [{json:{...$json,spreadsheetTitle:`LOCKED Zoom Giveaway ${stamp} — ${Number($json.eligibleCount)} eligible`}}];"
+      },
+      "id": "3aa0b567-3156-5b94-ac70-f0393bcb583b",
+      "name": "Prepare Spreadsheet Metadata",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        340,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "spreadsheet",
+        "operation": "create",
+        "title": "={{$('Prepare Spreadsheet Metadata').first().json.spreadsheetTitle}}",
+        "sheetsUi": {
+          "sheetValues": [
+            {
+              "title": "Eligible Entrants",
+              "hidden": false
+            }
+          ]
+        },
+        "options": {
+          "locale": "en_US"
+        }
+      },
+      "id": "e0a5e60e-6ced-57a9-b945-c059279fc585",
+      "name": "Create Locked Spreadsheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        600,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const lock=$('Prepare Spreadsheet Metadata').first().json;\nconst entries=Array.isArray(lock.entries)?lock.entries:[];\nif (!entries.length) throw new Error('The locked snapshot contained no entries.');\nreturn entries.map(e=>({json:{'Draw Number':Number(e.drawNumber),'Original Serial':Number(e.serialNo),'Participant Name':e.fullName,'Masked Email':e.maskedEmail,'Present At Lock':e.presentAt,'Eligibility':'ELIGIBLE — LOCKED'}}));"
+      },
+      "id": "67696fcd-2c91-51bd-97ec-bacb86329850",
+      "name": "Create Eligible Row Items",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        860,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "resource": "sheet",
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "={{$('Create Locked Spreadsheet').first().json.spreadsheetId}}",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Eligible Entrants",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {
+          "useAppend": true,
+          "cellFormat": "RAW"
+        }
+      },
+      "id": "29150043-62e0-5133-a69a-670132ff0995",
+      "name": "Append Eligible Rows",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1120,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const lock=$('Prepare Spreadsheet Metadata').first().json;\nconst created=$('Create Locked Spreadsheet').first().json;\nreturn [{json:{lockId:lock.lockId,lockedAt:lock.lockedAt,eligibleCount:Number(lock.eligibleCount),source:lock.source,spreadsheetId:created.spreadsheetId,sheetId:String(created.sheets?.[0]?.properties?.sheetId??0),sheetTitle:created.properties?.title??lock.spreadsheetTitle,sheetUrl:created.spreadsheetUrl??`https://docs.google.com/spreadsheets/d/${created.spreadsheetId}/edit`}}];"
+      },
+      "id": "0df86165-0971-5f3b-b46e-d23d47b2772e",
+      "name": "Collapse Sheet Write Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1380,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{'https://sheets.googleapis.com/v4/spreadsheets/' + encodeURIComponent($json.spreadsheetId) + ':batchUpdate'}}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": false,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleSheetsOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({requests:[{updateSheetProperties:{properties:{sheetId:Number($json.sheetId),gridProperties:{frozenRowCount:1}},fields:'gridProperties.frozenRowCount'}},{repeatCell:{range:{sheetId:Number($json.sheetId),startRowIndex:0,endRowIndex:1},cell:{userEnteredFormat:{textFormat:{bold:true},horizontalAlignment:'CENTER'}},fields:'userEnteredFormat(textFormat,horizontalAlignment)'}},{addProtectedRange:{protectedRange:{range:{sheetId:Number($json.sheetId)},description:'Immutable giveaway snapshot. Only the spreadsheet owner should edit this sheet.',warningOnly:false}}}]}) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        }
+      },
+      "id": "4ac0f44c-72d6-5412-bc88-566d0a3ee2f6",
+      "name": "Protect & Format Spreadsheet",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1640,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "0711cb85-289a-5b27-8a41-13fd8171ecd2",
+              "name": "lockId",
+              "value": "={{$('Collapse Sheet Write Result').first().json.lockId}}",
+              "type": "string"
+            },
+            {
+              "id": "ee7694b8-2a03-54e5-9c8c-10a074f3fd4b",
+              "name": "lockedAt",
+              "value": "={{$('Collapse Sheet Write Result').first().json.lockedAt}}",
+              "type": "string"
+            },
+            {
+              "id": "c46e7318-ee51-5abe-aafe-145c2ae58995",
+              "name": "eligibleCount",
+              "value": "={{$('Collapse Sheet Write Result').first().json.eligibleCount}}",
+              "type": "number"
+            },
+            {
+              "id": "c57dfd36-d455-519a-9e3c-3fc9b61605c6",
+              "name": "source",
+              "value": "={{$('Collapse Sheet Write Result').first().json.source}}",
+              "type": "string"
+            },
+            {
+              "id": "aab0582b-ec11-588a-8498-bd9b148b99ef",
+              "name": "sheetId",
+              "value": "={{$('Collapse Sheet Write Result').first().json.spreadsheetId}}",
+              "type": "string"
+            },
+            {
+              "id": "0b28690a-7ef3-5c85-b4b3-f74cf356892b",
+              "name": "sheetTitle",
+              "value": "={{$('Collapse Sheet Write Result').first().json.sheetTitle}}",
+              "type": "string"
+            },
+            {
+              "id": "10204554-7198-561c-b5d6-265837852448",
+              "name": "sheetUrl",
+              "value": "={{$('Collapse Sheet Write Result').first().json.sheetUrl}}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      },
+      "id": "dc9001d4-7529-590b-9055-c2d6d141a59e",
+      "name": "Build Sheet Audit Payload",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1900,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT public.api_attach_sheet($1::jsonb) AS result;",
+        "options": {
+          "queryBatching": "single",
+          "largeNumbersOutput": "text",
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "id": "4ea51926-ce8d-5367-90c1-455f44a5f813",
+      "name": "Attach Google Sheet to Lock",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        2160,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const audit=$('Build Sheet Audit Payload').first().json; const db=$json.result??$json;\nreturn [{json:{ok:true,alreadyLocked:false,lockId:audit.lockId,lockedAt:audit.lockedAt,eligibleCount:Number(audit.eligibleCount),rng:{min:1,max:Number(audit.eligibleCount)},instruction:`Use random-number range 1 to ${Number(audit.eligibleCount)}.`,sheetTitle:audit.sheetTitle,sheetUrl:audit.sheetUrl,source:audit.source,databaseAttached:Boolean(db.ok)}}];"
+      },
+      "id": "25194559-2641-5aa8-ad8e-6fc3197d4850",
+      "name": "Format New Locked Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2420,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "034df12e-ae6d-5d34-9918-2f28a53ceecb",
+              "leftValue": "={{$json.source === \"webhook\"}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f15b4131-e7a2-56c4-866d-bca6738a383d",
+      "name": "New Result Came From Webhook?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        2680,
+        340
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {
+          "responseCode": 201,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "96f7bdb2-9586-5e19-93c5-0dae63bbb3b7",
+      "name": "Return New Locked Sheet",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        2940,
+        280
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "7caa6f8c-ef33-5df5-bc20-2c3f32aaf2a6",
+      "name": "Show New Manual Result",
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2940,
+        400
+      ]
+    }
+  ],
+  "connections": {
+    "Live Status Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Status Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Status Request": {
+      "main": [
+        [
+          {
+            "node": "Get Live Status — Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Live Status — Webhook": {
+      "main": [
+        [
+          {
+            "node": "Unwrap Live Status — Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unwrap Live Status — Webhook": {
+      "main": [
+        [
+          {
+            "node": "Return Live Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DEMO — Check Live Status": {
+      "main": [
+        [
+          {
+            "node": "Demo Status Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Demo Status Request": {
+      "main": [
+        [
+          {
+            "node": "Get Live Status — Demo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Live Status — Demo": {
+      "main": [
+        [
+          {
+            "node": "Show Demo Live Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lock Giveaway Webhook": {
+      "main": [
+        [
+          {
+            "node": "Normalize Lock Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize Lock Request": {
+      "main": [
+        [
+          {
+            "node": "Create or Get Immutable Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DEMO — Lock & Create Google Sheet": {
+      "main": [
+        [
+          {
+            "node": "Demo Lock Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Demo Lock Request": {
+      "main": [
+        [
+          {
+            "node": "Create or Get Immutable Snapshot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create or Get Immutable Snapshot": {
+      "main": [
+        [
+          {
+            "node": "Unwrap Lock Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Unwrap Lock Result": {
+      "main": [
+        [
+          {
+            "node": "Lock Ready?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lock Ready?": {
+      "main": [
+        [
+          {
+            "node": "Spreadsheet Already Attached?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Lock Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Lock Error": {
+      "main": [
+        [
+          {
+            "node": "Lock Error Came From Webhook?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lock Error Came From Webhook?": {
+      "main": [
+        [
+          {
+            "node": "Return Lock Error",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Show Manual Lock Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Spreadsheet Already Attached?": {
+      "main": [
+        [
+          {
+            "node": "Format Existing Locked Result",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare Spreadsheet Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Existing Locked Result": {
+      "main": [
+        [
+          {
+            "node": "Existing Result Came From Webhook?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Existing Result Came From Webhook?": {
+      "main": [
+        [
+          {
+            "node": "Return Existing Locked Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Show Existing Manual Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Spreadsheet Metadata": {
+      "main": [
+        [
+          {
+            "node": "Create Locked Spreadsheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Locked Spreadsheet": {
+      "main": [
+        [
+          {
+            "node": "Create Eligible Row Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Eligible Row Items": {
+      "main": [
+        [
+          {
+            "node": "Append Eligible Rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append Eligible Rows": {
+      "main": [
+        [
+          {
+            "node": "Collapse Sheet Write Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Collapse Sheet Write Result": {
+      "main": [
+        [
+          {
+            "node": "Protect & Format Spreadsheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Protect & Format Spreadsheet": {
+      "main": [
+        [
+          {
+            "node": "Build Sheet Audit Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Sheet Audit Payload": {
+      "main": [
+        [
+          {
+            "node": "Attach Google Sheet to Lock",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach Google Sheet to Lock": {
+      "main": [
+        [
+          {
+            "node": "Format New Locked Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format New Locked Result": {
+      "main": [
+        [
+          {
+            "node": "New Result Came From Webhook?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New Result Came From Webhook?": {
+      "main": [
+        [
+          {
+            "node": "Return New Locked Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Show New Manual Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "all"
+  },
+  "versionId": "da9af65f-5d42-5739-b96f-907b622c5ea8",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": [
+    {
+      "name": "Zoom Giveaway Final"
+    }
+  ]
+}

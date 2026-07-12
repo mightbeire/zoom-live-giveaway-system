@@ -1,0 +1,57 @@
+{
+  "files": {
+    "01-registration-setup-demo.json": {
+      "workflowName": "01 \u2014 Zoom Giveaway Registration + Setup + Demo Seed",
+      "nodes": 24,
+      "connections": 16,
+      "errors": [],
+      "nodeTypes": {
+        "n8n-nodes-base.code": 3,
+        "n8n-nodes-base.httpRequest": 1,
+        "n8n-nodes-base.if": 3,
+        "n8n-nodes-base.manualTrigger": 2,
+        "n8n-nodes-base.postgres": 4,
+        "n8n-nodes-base.respondToWebhook": 4,
+        "n8n-nodes-base.set": 4,
+        "n8n-nodes-base.stickyNote": 2,
+        "n8n-nodes-base.webhook": 1
+      }
+    },
+    "02-attendance-demo.json": {
+      "workflowName": "02 \u2014 Zoom Giveaway Attendance + Demo Simulator",
+      "nodes": 31,
+      "connections": 22,
+      "errors": [],
+      "nodeTypes": {
+        "n8n-nodes-base.code": 7,
+        "n8n-nodes-base.if": 2,
+        "n8n-nodes-base.manualTrigger": 5,
+        "n8n-nodes-base.postgres": 7,
+        "n8n-nodes-base.respondToWebhook": 2,
+        "n8n-nodes-base.set": 5,
+        "n8n-nodes-base.stickyNote": 2,
+        "n8n-nodes-base.webhook": 1
+      }
+    },
+    "03-status-lock-google-sheet.json": {
+      "workflowName": "03 \u2014 Zoom Giveaway Status + Lock + Google Sheet",
+      "nodes": 39,
+      "connections": 29,
+      "errors": [],
+      "nodeTypes": {
+        "n8n-nodes-base.code": 9,
+        "n8n-nodes-base.googleSheets": 2,
+        "n8n-nodes-base.httpRequest": 1,
+        "n8n-nodes-base.if": 5,
+        "n8n-nodes-base.manualTrigger": 2,
+        "n8n-nodes-base.noOp": 3,
+        "n8n-nodes-base.postgres": 4,
+        "n8n-nodes-base.respondToWebhook": 4,
+        "n8n-nodes-base.set": 5,
+        "n8n-nodes-base.stickyNote": 2,
+        "n8n-nodes-base.webhook": 2
+      }
+    }
+  },
+  "errors": []
+}

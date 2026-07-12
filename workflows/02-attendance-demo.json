@@ -1,0 +1,908 @@
+{
+  "name": "02 — Zoom Giveaway Attendance + Demo Simulator",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 02 — Verified Zoom attendance and demo controls\n\n**Production:** verifies Zoom's HMAC signature, handles endpoint validation, acknowledges valid events quickly, then writes the join/leave state atomically to Postgres.\n\n**Demo:** four manual triggers let you show entrants joining, staff joining, five entrants leaving, and attendance resetting—without access to the creator's Zoom account.",
+        "height": 400,
+        "width": 760,
+        "color": 5
+      },
+      "id": "34bf5021-091b-505f-a1d2-3d01f7bcaf5c",
+      "name": "WF2 README",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1220,
+        -780
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## One unavoidable non-credential value\n\nOn n8n Cloud Starter, a Code node cannot read a normal credential's secret value. Therefore: edit the `Zoom Webhook Secret — Paste Once` field, run that setup branch once, then replace the field with `SAVED_IN_DATABASE` if desired.\n\nThe real secret is thereafter read from Postgres. This avoids leaving it inside every execution branch.",
+        "height": 400,
+        "width": 760,
+        "color": 2
+      },
+      "id": "21446896-8e4c-5413-ba5e-25fe92b1c39e",
+      "name": "WF2 Secret Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -340,
+        -780
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "78db1d8d-ebee-5bbe-8a93-d6169ed689aa",
+      "name": "RUN ONCE — Save Zoom Webhook Secret",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1160,
+        -280
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "c2e6fc5f-26ec-55c7-af7c-a59d62d6f4d0",
+              "name": "secretKey",
+              "value": "zoom_webhook_secret",
+              "type": "string"
+            },
+            {
+              "id": "a28f6bca-87ec-50d0-8954-88b51dd57f04",
+              "name": "secretValue",
+              "value": "PASTE_ZOOM_WEBHOOK_SECRET_HERE",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      },
+      "id": "aa690e4c-e3d9-5af2-8287-8498ebb2aeb0",
+      "name": "Zoom Webhook Secret — Paste Once",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -900,
+        -280
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT public.api_save_secret($1::jsonb) AS result;",
+        "options": {
+          "queryBatching": "single",
+          "largeNumbersOutput": "text",
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "id": "b2cf77ed-80b9-5d99-8a84-720f37010d1d",
+      "name": "Store Zoom Webhook Secret",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -640,
+        -280
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{json:$json.result ?? $json}];"
+      },
+      "id": "76907bc9-8224-5c4d-8396-6d99d8a459ec",
+      "name": "Show Secret Setup Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -380,
+        -280
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "zoom-giveaway/events",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "b28f879e-9c4c-5baf-8660-ac0f540866f2",
+      "name": "Zoom Events Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1160,
+        40
+      ],
+      "webhookId": "5e3db12f-ae08-5d9c-9106-4cd325b0572e"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT coalesce((SELECT secret_value FROM public.app_secrets WHERE secret_key='zoom_webhook_secret'),'') AS secret_value;",
+        "options": {
+          "queryBatching": "single",
+          "largeNumbersOutput": "text"
+        }
+      },
+      "id": "f3ca2bc1-b938-5ae7-ba00-5d22c0006fa0",
+      "name": "Read Zoom Webhook Secret",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -900,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const crypto=require('crypto');\nconst webhookItem=$('Zoom Events Webhook').first();\nconst req=webhookItem.json;\nconst headers={}; for (const [k,v] of Object.entries(req.headers??{})) headers[String(k).toLowerCase()]=v;\nlet rawBody;\nconst rawBase64=webhookItem.binary?.data?.data;\nif (rawBase64) rawBody=Buffer.from(rawBase64,'base64').toString('utf8');\nelse if (typeof req.body==='string') rawBody=req.body;\nelse rawBody=JSON.stringify(req.body??req);\nlet payload; try { payload=JSON.parse(rawBody); } catch { throw new Error('Zoom webhook body is not valid JSON.'); }\nconst secret=String($json.secret_value??''); if (!secret) throw new Error('Zoom webhook secret has not been saved. Run the setup branch first.');\nif (payload.event==='endpoint.url_validation') {\n const plainToken=payload?.payload?.plainToken; if (!plainToken) throw new Error('Validation payload is missing plainToken.');\n return [{json:{validation:true,processable:false,response:{plainToken,encryptedToken:crypto.createHmac('sha256',secret).update(plainToken).digest('hex')}}}];\n}\nconst timestamp=String(headers['x-zm-request-timestamp']??'');\nconst supplied=String(headers['x-zm-signature']??'');\nif (!timestamp||!supplied) throw new Error('Missing Zoom signature headers.');\nconst age=Math.abs(Math.floor(Date.now()/1000)-Number(timestamp)); if (!Number.isFinite(age)||age>300) throw new Error('Zoom webhook timestamp is outside the five-minute replay window.');\nconst expected=`v0=${crypto.createHmac('sha256',secret).update(`v0:${timestamp}:${rawBody}`).digest('hex')}`;\nconst a=Buffer.from(expected); const b=Buffer.from(supplied); if (a.length!==b.length||!crypto.timingSafeEqual(a,b)) throw new Error('Invalid Zoom webhook signature.');\nconst eventType=String(payload.event??'');\nconst meeting=payload?.payload?.object??{}; const participant=meeting.participant??{};\nconst processable=['meeting.participant_joined','meeting.participant_left'].includes(eventType);\nconst participantUuid=String(participant.participant_uuid??participant.id??participant.user_id??'');\nconst rawTime=participant.join_time??participant.leave_time;\nconst eventTime=rawTime?new Date(rawTime).toISOString():new Date(Number(payload.event_ts??Date.now())).toISOString();\nconst meetingUuid=String(meeting.uuid??''); const meetingId=String(meeting.id??'').replace(/\\s/g,'');\nconst registrantId=String(participant.registrant_id??''); const zoomUserId=String(participant.user_id??participant.id??'');\nconst email=String(participant.email??'').trim().toLowerCase(); const name=String(participant.user_name??participant.name??'Unknown participant').trim();\nconst eventKey=crypto.createHash('sha256').update([eventType,meetingUuid,participantUuid,registrantId,email,eventTime].join('|')).digest('hex');\nreturn [{json:{validation:false,processable,response:{ok:true},eventKey,eventType,meetingId,meetingUuid,participantUuid,registrantId,zoomUserId,email,name,eventTime,rawPayload:payload}}];"
+      },
+      "id": "654119b8-2214-57ab-8f48-cec0591f87e2",
+      "name": "Verify Zoom Signature & Normalize",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -640,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "3b7f71a2-2de3-5213-a305-054b9705f69a",
+              "leftValue": "={{$json.validation}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "54903ccf-8045-5a90-866f-b270587afe74",
+      "name": "Zoom URL Validation?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -380,
+        40
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json.response}}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "db985057-585e-50a6-b07b-5fa73218365e",
+      "name": "Return Zoom Validation Challenge",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -120,
+        -80
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json.response}}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "edeaf854-ee97-5a21-a02f-333a1b3bba71",
+      "name": "Acknowledge Valid Zoom Event",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -120,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "2b579345-f535-543b-a8e2-76cfc5f1e732",
+              "leftValue": "={{$json.processable}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "edb88f2b-17f9-59c6-b18c-6a364e427794",
+      "name": "Supported Join or Leave?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        140,
+        120
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT public.api_process_zoom_event($1::jsonb) AS result;",
+        "options": {
+          "queryBatching": "single",
+          "largeNumbersOutput": "text",
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "id": "76f98bf3-e0e3-5830-a566-3946a0e33461",
+      "name": "Process Attendance Transaction",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        400,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{json:$json.result ?? $json}];"
+      },
+      "id": "040b7a61-643a-50f5-aa29-a352168ef2ab",
+      "name": "Show Attendance Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        660,
+        60
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "92fafa60-3b67-500e-aeef-02130a004e36",
+      "name": "DEMO 1 — Join 25 Entrants",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1160,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "73d89c1c-69a5-5a0c-b9c6-e5515250d7c4",
+              "name": "meetingId",
+              "value": "DEMO-MEETING-001",
+              "type": "string"
+            },
+            {
+              "id": "efe8d6bb-6967-52bd-bc18-782842c2f55b",
+              "name": "meetingUuid",
+              "value": "demo-live-001",
+              "type": "string"
+            },
+            {
+              "id": "14044b76-6ae4-56b4-99ac-9b63e8128732",
+              "name": "action",
+              "value": "join_entrants",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      },
+      "id": "71380dcf-f84c-540c-ae50-e7b05934f132",
+      "name": "DEMO 1 — Join 25 Entrants Payload",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -900,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT public.api_demo_attendance($1::jsonb) AS result;",
+        "options": {
+          "queryBatching": "single",
+          "largeNumbersOutput": "text",
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "id": "82c331ef-0303-5dc4-a8d1-588fe2ce1de5",
+      "name": "DEMO 1 — Join 25 Entrants Database Update",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -640,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{json:$json.result ?? $json}];"
+      },
+      "id": "693b2b22-d4b4-5fac-9070-4a38b3e572f1",
+      "name": "DEMO 1 — Join 25 Entrants Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -380,
+        420
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d16431cc-929e-544d-98f3-6794a23eb4c7",
+      "name": "DEMO 2 — Join 3 Staff",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1160,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "f6e0f6b0-9ffc-5c63-b352-2681c11f424f",
+              "name": "meetingId",
+              "value": "DEMO-MEETING-001",
+              "type": "string"
+            },
+            {
+              "id": "6a4b2722-882e-5655-a505-8ab08c1721be",
+              "name": "meetingUuid",
+              "value": "demo-live-001",
+              "type": "string"
+            },
+            {
+              "id": "776284a2-2fdf-5474-b337-e889367fbf70",
+              "name": "action",
+              "value": "join_staff",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      },
+      "id": "9685eae5-2d5e-5387-a4f8-7fffebf46fb2",
+      "name": "DEMO 2 — Join 3 Staff Payload",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -900,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT public.api_demo_attendance($1::jsonb) AS result;",
+        "options": {
+          "queryBatching": "single",
+          "largeNumbersOutput": "text",
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "id": "158bcaf9-afb8-50e4-ac05-f34c63afb7eb",
+      "name": "DEMO 2 — Join 3 Staff Database Update",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -640,
+        560
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{json:$json.result ?? $json}];"
+      },
+      "id": "2aab65ca-d138-562b-9998-8ea3a61eb441",
+      "name": "DEMO 2 — Join 3 Staff Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -380,
+        560
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "adeb21f2-2444-59e7-bb8a-11d6f71bdf11",
+      "name": "DEMO 3 — Five Entrants Leave",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1160,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3784f701-1054-562b-b271-a15f3422fab6",
+              "name": "meetingId",
+              "value": "DEMO-MEETING-001",
+              "type": "string"
+            },
+            {
+              "id": "c5e3e5c9-dccf-54b5-963e-170f1570bf94",
+              "name": "meetingUuid",
+              "value": "demo-live-001",
+              "type": "string"
+            },
+            {
+              "id": "d9fd8de4-6c67-5861-baf5-11a57938803b",
+              "name": "action",
+              "value": "leave_five",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      },
+      "id": "2514a8ab-0e9d-5e21-b67d-c521c674b826",
+      "name": "DEMO 3 — Five Entrants Leave Payload",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -900,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT public.api_demo_attendance($1::jsonb) AS result;",
+        "options": {
+          "queryBatching": "single",
+          "largeNumbersOutput": "text",
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "id": "bf770f5f-e4ad-536b-a795-f0ea4d729358",
+      "name": "DEMO 3 — Five Entrants Leave Database Update",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -640,
+        700
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{json:$json.result ?? $json}];"
+      },
+      "id": "dde9184a-4693-5c84-8eac-4755e2a9cae6",
+      "name": "DEMO 3 — Five Entrants Leave Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -380,
+        700
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "d023a90c-a9e2-536f-948d-d6d6911648c3",
+      "name": "DEMO 0 — Reset Attendance",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1160,
+        840
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "e224dee1-d1d7-570c-832d-46cdf618cc22",
+              "name": "meetingId",
+              "value": "DEMO-MEETING-001",
+              "type": "string"
+            },
+            {
+              "id": "63be3184-7624-5584-90ce-fedb11f0d7b6",
+              "name": "meetingUuid",
+              "value": "demo-live-001",
+              "type": "string"
+            },
+            {
+              "id": "75b7bdb8-1666-53ac-be97-5e0421f6957c",
+              "name": "action",
+              "value": "reset",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      },
+      "id": "eeaa43c9-f087-593f-a2d9-9a021c967a91",
+      "name": "DEMO 0 — Reset Attendance Payload",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -900,
+        840
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT public.api_demo_attendance($1::jsonb) AS result;",
+        "options": {
+          "queryBatching": "single",
+          "largeNumbersOutput": "text",
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "id": "8c38c91e-845f-5176-997e-a640bad404a9",
+      "name": "DEMO 0 — Reset Attendance Database Update",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -640,
+        840
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{json:$json.result ?? $json}];"
+      },
+      "id": "7776918e-9cbe-5129-9408-3f7a2cb96141",
+      "name": "DEMO 0 — Reset Attendance Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -380,
+        840
+      ]
+    }
+  ],
+  "connections": {
+    "RUN ONCE — Save Zoom Webhook Secret": {
+      "main": [
+        [
+          {
+            "node": "Zoom Webhook Secret — Paste Once",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zoom Webhook Secret — Paste Once": {
+      "main": [
+        [
+          {
+            "node": "Store Zoom Webhook Secret",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Zoom Webhook Secret": {
+      "main": [
+        [
+          {
+            "node": "Show Secret Setup Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zoom Events Webhook": {
+      "main": [
+        [
+          {
+            "node": "Read Zoom Webhook Secret",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Zoom Webhook Secret": {
+      "main": [
+        [
+          {
+            "node": "Verify Zoom Signature & Normalize",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Verify Zoom Signature & Normalize": {
+      "main": [
+        [
+          {
+            "node": "Zoom URL Validation?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zoom URL Validation?": {
+      "main": [
+        [
+          {
+            "node": "Return Zoom Validation Challenge",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Acknowledge Valid Zoom Event",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Acknowledge Valid Zoom Event": {
+      "main": [
+        [
+          {
+            "node": "Supported Join or Leave?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Supported Join or Leave?": {
+      "main": [
+        [
+          {
+            "node": "Process Attendance Transaction",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process Attendance Transaction": {
+      "main": [
+        [
+          {
+            "node": "Show Attendance Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DEMO 1 — Join 25 Entrants": {
+      "main": [
+        [
+          {
+            "node": "DEMO 1 — Join 25 Entrants Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DEMO 1 — Join 25 Entrants Payload": {
+      "main": [
+        [
+          {
+            "node": "DEMO 1 — Join 25 Entrants Database Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DEMO 1 — Join 25 Entrants Database Update": {
+      "main": [
+        [
+          {
+            "node": "DEMO 1 — Join 25 Entrants Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DEMO 2 — Join 3 Staff": {
+      "main": [
+        [
+          {
+            "node": "DEMO 2 — Join 3 Staff Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DEMO 2 — Join 3 Staff Payload": {
+      "main": [
+        [
+          {
+            "node": "DEMO 2 — Join 3 Staff Database Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DEMO 2 — Join 3 Staff Database Update": {
+      "main": [
+        [
+          {
+            "node": "DEMO 2 — Join 3 Staff Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DEMO 3 — Five Entrants Leave": {
+      "main": [
+        [
+          {
+            "node": "DEMO 3 — Five Entrants Leave Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DEMO 3 — Five Entrants Leave Payload": {
+      "main": [
+        [
+          {
+            "node": "DEMO 3 — Five Entrants Leave Database Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DEMO 3 — Five Entrants Leave Database Update": {
+      "main": [
+        [
+          {
+            "node": "DEMO 3 — Five Entrants Leave Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DEMO 0 — Reset Attendance": {
+      "main": [
+        [
+          {
+            "node": "DEMO 0 — Reset Attendance Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DEMO 0 — Reset Attendance Payload": {
+      "main": [
+        [
+          {
+            "node": "DEMO 0 — Reset Attendance Database Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DEMO 0 — Reset Attendance Database Update": {
+      "main": [
+        [
+          {
+            "node": "DEMO 0 — Reset Attendance Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataSuccessExecution": "none",
+    "saveDataErrorExecution": "all"
+  },
+  "versionId": "66f916b2-f01a-58bf-bfae-de888f92da1d",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": [
+    {
+      "name": "Zoom Giveaway Final"
+    }
+  ]
+}

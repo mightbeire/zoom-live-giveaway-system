@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="description" content="Private control page for the Zoom attendance-qualified giveaway." />
+  <title>Zoom Giveaway Control</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div>
+        <p class="eyebrow">PRIVATE OPERATOR PAGE</p>
+        <h1>Zoom Giveaway Control</h1>
+      </div>
+      <span id="connection" class="badge">Not connected</span>
+    </header>
+
+    <section class="intro">
+      <h2>Lock the draw to people who are actually present.</h2>
+      <p>Staff and unmatched guests are excluded. The final Google Sheet is numbered from 1 to the exact eligible total.</p>
+    </section>
+
+    <section class="panel setup">
+      <label>
+        Meeting ID
+        <input id="meetingId" autocomplete="off" placeholder="123456789" />
+      </label>
+      <label>
+        Meeting UUID
+        <input id="meetingUuid" autocomplete="off" placeholder="Exact meeting instance UUID" />
+      </label>
+      <label>
+        Admin key
+        <input id="adminKey" type="password" autocomplete="off" placeholder="Header Auth value" />
+      </label>
+      <button id="connectBtn" class="button secondary">Connect</button>
+    </section>
+
+    <section class="metrics">
+      <article><span>Registered</span><strong id="registered">—</strong></article>
+      <article><span>Connected sessions</span><strong id="connectedSessions">—</strong></article>
+      <article><span>Identified entrants</span><strong id="identifiedEntrants">—</strong></article>
+      <article><span>Staff connected</span><strong id="staffConnected">—</strong></article>
+      <article><span>Unmatched</span><strong id="unmatchedParticipants">—</strong></article>
+      <article class="eligible"><span>Eligible now</span><strong id="currentlyEligible">—</strong></article>
+    </section>
+
+    <section class="grid">
+      <article class="panel">
+        <div class="row">
+          <div>
+            <p class="eyebrow">GIVEAWAY STATE</p>
+            <h3 id="stateTitle">Waiting for status</h3>
+          </div>
+          <span id="stateBadge" class="badge">OPEN</span>
+        </div>
+        <p id="updated" class="muted">No status fetched.</p>
+        <div id="warning" class="warning">
+          Locking is irreversible for this meeting UUID. Check the meeting details before continuing.
+        </div>
+        <div class="actions">
+          <button id="refreshBtn" class="button secondary">Refresh status</button>
+          <button id="lockBtn" class="button primary" disabled>Lock giveaway list</button>
+        </div>
+      </article>
+
+      <article class="panel result">
+        <p class="eyebrow">LOCKED RESULT</p>
+        <div id="emptyResult">
+          <h3>No list locked yet</h3>
+          <p class="muted">The final range and Google Sheet link will appear here.</p>
+        </div>
+        <div id="lockedResult" hidden>
+          <p class="success">GIVEAWAY LOCKED</p>
+          <span class="muted">Use random-number range</span>
+          <strong class="range"><span id="rngMin">1</span>–<span id="rngMax">—</span></strong>
+          <p id="instruction" class="muted"></p>
+          <a id="sheetLink" class="button primary full" target="_blank" rel="noopener">Open locked Google Sheet</a>
+          <button id="copyBtn" class="button secondary full">Copy range</button>
+        </div>
+      </article>
+    </section>
+
+    <footer>
+      The database snapshot is the official list. Google Sheets is the transparent display used during the public draw.
+    </footer>
+  </main>
+
+  <dialog id="confirmDialog">
+    <form method="dialog">
+      <p class="eyebrow">IRREVERSIBLE</p>
+      <h3>Lock the current eligible list?</h3>
+      <p>Later joins and departures will not change this meeting's snapshot.</p>
+      <div class="actions">
+        <button value="cancel" class="button secondary">Cancel</button>
+        <button value="confirm" class="button primary">Lock list</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="./config.js"></script>
+  <script src="./app.js"></script>
+</body>
+</html>

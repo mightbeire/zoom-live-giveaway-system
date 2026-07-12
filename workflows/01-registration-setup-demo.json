@@ -1,0 +1,866 @@
+{
+  "name": "01 — Zoom Giveaway Registration + Setup + Demo Seed",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## 01 — Registration, database installer, and demo seed\n\n**Production:** receives a registration, checks duplicates, creates a Zoom registrant through the official API, stores the permanent serial, and returns the unique join URL.\n\n**Setup:** the purple manual branch installs every table and database function.\n\n**Demo:** the lower manual branch resets and seeds 25 entrants plus three staff members.\n\nComments explain the reason for each non-obvious design decision.",
+        "height": 430,
+        "width": 760,
+        "color": 5
+      },
+      "id": "09a3c9a5-0bb3-5457-be94-88ef6b99cbae",
+      "name": "WF1 README",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1180,
+        -760
+      ]
+    },
+    {
+      "parameters": {
+        "content": "## Fill these credentials\n\n1. **Postgres** — use Supabase's pooled Postgres connection. Select the same credential in every Postgres node.\n2. **Zoom OAuth2 API** — select/create it only in `Zoom — Add Meeting Registrant`. Add the Zoom scope `meeting:write:registrant` (or the admin equivalent).\n\nNo Supabase URL, Google Sheet ID, n8n variable, or token cache is required.",
+        "height": 390,
+        "width": 700,
+        "color": 3
+      },
+      "id": "4f84ba98-4625-5bc2-b393-01bce0452e14",
+      "name": "WF1 Credentials",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -320,
+        -760
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "1d83a580-2395-5f17-9bb8-1af92f974690",
+      "name": "RUN ONCE — Install Database",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1120,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "create extension if not exists pgcrypto;\n\ncreate table if not exists public.meeting_counters (\n  meeting_id text primary key,\n  last_serial bigint not null default 0,\n  updated_at timestamptz not null default now()\n);\n\ncreate table if not exists public.entrants (\n  id uuid primary key default gen_random_uuid(),\n  meeting_id text not null,\n  serial_no bigint not null,\n  full_name text not null,\n  email text not null,\n  zoom_registrant_id text,\n  join_url text,\n  source text not null default 'registration-webhook',\n  disqualified boolean not null default false,\n  disqualification_reason text,\n  created_at timestamptz not null default now(),\n  updated_at timestamptz not null default now(),\n  unique (meeting_id, email),\n  unique (meeting_id, serial_no),\n  unique (meeting_id, zoom_registrant_id)\n);\ncreate index if not exists entrants_meeting_email_idx on public.entrants(meeting_id, lower(email));\n\ncreate table if not exists public.staff (\n  id uuid primary key default gen_random_uuid(),\n  meeting_id text not null,\n  full_name text not null,\n  email text,\n  zoom_user_id text,\n  zoom_registrant_id text,\n  role text not null default 'team',\n  active boolean not null default true,\n  created_at timestamptz not null default now()\n);\ncreate unique index if not exists staff_meeting_email_unique on public.staff(meeting_id, lower(email)) where email is not null;\n\ncreate table if not exists public.zoom_events (\n  id bigint generated always as identity primary key,\n  event_key text not null unique,\n  event_type text not null,\n  meeting_id text not null,\n  meeting_uuid text not null,\n  participant_uuid text not null,\n  event_time timestamptz not null,\n  raw_payload jsonb not null,\n  created_at timestamptz not null default now()\n);\n\ncreate table if not exists public.participant_sessions (\n  meeting_uuid text not null,\n  participant_uuid text not null,\n  meeting_id text not null,\n  entrant_id uuid references public.entrants(id) on delete set null,\n  registrant_id text,\n  zoom_user_id text,\n  email text,\n  participant_name text not null,\n  is_staff boolean not null default false,\n  active boolean not null default false,\n  joined_at timestamptz,\n  left_at timestamptz,\n  last_event_at timestamptz not null,\n  primary key(meeting_uuid, participant_uuid)\n);\ncreate index if not exists participant_sessions_live_idx on public.participant_sessions(meeting_uuid, active, entrant_id, is_staff);\n\ncreate table if not exists public.giveaway_locks (\n  id uuid primary key default gen_random_uuid(),\n  meeting_id text not null,\n  meeting_uuid text not null unique,\n  requested_by text,\n  locked_at timestamptz not null default now(),\n  eligible_count integer not null default 0,\n  immutable boolean not null default true,\n  sheet_id text,\n  sheet_title text,\n  sheet_url text\n);\n\ncreate table if not exists public.giveaway_lock_entries (\n  lock_id uuid not null references public.giveaway_locks(id) on delete restrict,\n  draw_number integer not null,\n  entrant_id uuid not null references public.entrants(id) on delete restrict,\n  serial_no bigint not null,\n  full_name text not null,\n  masked_email text not null,\n  present_at timestamptz not null,\n  primary key(lock_id, draw_number),\n  unique(lock_id, entrant_id)\n);\n\ncreate table if not exists public.app_secrets (\n  secret_key text primary key,\n  secret_value text not null,\n  updated_at timestamptz not null default now()\n);\n\ncreate or replace function public.mask_email(p_email text)\nreturns text language sql immutable as $$\n  select case when p_email is null or position('@' in p_email)=0 then 'hidden'\n  else left(split_part(p_email,'@',1),2)\n    || repeat('*', greatest(length(split_part(p_email,'@',1))-2,2))\n    || '@' || split_part(p_email,'@',2) end;\n$$;\n\ncreate or replace function public.api_save_secret(p jsonb)\nreturns jsonb language plpgsql as $$\nbegin\n  if coalesce(p->>'secretValue','') in ('','PASTE_ZOOM_WEBHOOK_SECRET_HERE') then\n    return jsonb_build_object('ok',false,'error','Paste the real Zoom webhook secret before running this setup branch.');\n  end if;\n  insert into public.app_secrets(secret_key,secret_value,updated_at)\n  values(coalesce(nullif(p->>'secretKey',''),'zoom_webhook_secret'),p->>'secretValue',now())\n  on conflict(secret_key) do update set secret_value=excluded.secret_value,updated_at=now();\n  return jsonb_build_object('ok',true,'saved',true,'secretKey',coalesce(nullif(p->>'secretKey',''),'zoom_webhook_secret'));\nend; $$;\n\ncreate or replace function public.api_find_entrant(p jsonb)\nreturns jsonb language sql stable as $$\n  select coalesce((select to_jsonb(e) from public.entrants e\n    where e.meeting_id=p->>'meetingId' and lower(e.email)=lower(trim(p->>'email')) limit 1),'{}'::jsonb);\n$$;\n\ncreate or replace function public.api_register_entrant(p jsonb)\nreturns jsonb language plpgsql as $$\ndeclare v_row public.entrants%rowtype; v_serial bigint;\nbegin\n  select * into v_row from public.entrants\n   where meeting_id=p->>'meetingId' and lower(email)=lower(trim(p->>'email')) limit 1;\n  if found then return to_jsonb(v_row); end if;\n\n  insert into public.meeting_counters(meeting_id,last_serial)\n  values(p->>'meetingId',1)\n  on conflict(meeting_id) do update set last_serial=public.meeting_counters.last_serial+1,updated_at=now()\n  returning last_serial into v_serial;\n\n  insert into public.entrants(meeting_id,serial_no,full_name,email,zoom_registrant_id,join_url,source)\n  values(p->>'meetingId',v_serial,trim(p->>'fullName'),lower(trim(p->>'email')),\n         nullif(p->>'zoomRegistrantId',''),p->>'joinUrl',coalesce(nullif(p->>'source',''),'registration-webhook'))\n  returning * into v_row;\n  return to_jsonb(v_row);\nexception when unique_violation then\n  select * into v_row from public.entrants\n   where meeting_id=p->>'meetingId' and lower(email)=lower(trim(p->>'email')) limit 1;\n  return to_jsonb(v_row);\nend; $$;\n\ncreate or replace function public.api_process_zoom_event(p jsonb)\nreturns jsonb language plpgsql as $$\ndeclare\n  v_inserted integer; v_entrant_id uuid; v_is_staff boolean:=false; v_active_sessions integer:=0;\n  v_join boolean := (p->>'eventType'='meeting.participant_joined');\n  v_time timestamptz := (p->>'eventTime')::timestamptz;\nbegin\n  insert into public.zoom_events(event_key,event_type,meeting_id,meeting_uuid,participant_uuid,event_time,raw_payload)\n  values(p->>'eventKey',p->>'eventType',p->>'meetingId',p->>'meetingUuid',p->>'participantUuid',v_time,coalesce(p->'rawPayload','{}'::jsonb))\n  on conflict(event_key) do nothing;\n  get diagnostics v_inserted=row_count;\n  if v_inserted=0 then return jsonb_build_object('ok',true,'duplicate',true); end if;\n\n  select e.id into v_entrant_id from public.entrants e\n   where e.meeting_id=p->>'meetingId' and (\n     (nullif(p->>'registrantId','') is not null and e.zoom_registrant_id=p->>'registrantId') or\n     (nullif(p->>'email','') is not null and lower(e.email)=lower(p->>'email')))\n   order by case when e.zoom_registrant_id=p->>'registrantId' then 0 else 1 end limit 1;\n\n  select exists(select 1 from public.staff s where s.meeting_id=p->>'meetingId' and s.active and (\n      (nullif(p->>'email','') is not null and s.email is not null and lower(s.email)=lower(p->>'email')) or\n      (nullif(p->>'zoomUserId','') is not null and s.zoom_user_id=p->>'zoomUserId') or\n      (nullif(p->>'registrantId','') is not null and s.zoom_registrant_id=p->>'registrantId'))) into v_is_staff;\n\n  insert into public.participant_sessions(meeting_uuid,participant_uuid,meeting_id,entrant_id,registrant_id,zoom_user_id,email,participant_name,is_staff,active,joined_at,left_at,last_event_at)\n  values(p->>'meetingUuid',p->>'participantUuid',p->>'meetingId',v_entrant_id,nullif(p->>'registrantId',''),nullif(p->>'zoomUserId',''),\n         nullif(lower(p->>'email'),''),coalesce(nullif(trim(p->>'name'),''),'Unknown participant'),v_is_staff,v_join,\n         case when v_join then v_time end,case when not v_join then v_time end,v_time)\n  on conflict(meeting_uuid,participant_uuid) do update set\n    meeting_id=excluded.meeting_id,\n    entrant_id=coalesce(excluded.entrant_id,public.participant_sessions.entrant_id),\n    registrant_id=coalesce(excluded.registrant_id,public.participant_sessions.registrant_id),\n    zoom_user_id=coalesce(excluded.zoom_user_id,public.participant_sessions.zoom_user_id),\n    email=coalesce(excluded.email,public.participant_sessions.email),\n    participant_name=excluded.participant_name,\n    is_staff=excluded.is_staff,\n    active=excluded.active,\n    joined_at=case when excluded.active then coalesce(public.participant_sessions.joined_at,excluded.joined_at) else public.participant_sessions.joined_at end,\n    left_at=case when not excluded.active then excluded.left_at else null end,\n    last_event_at=excluded.last_event_at;\n\n  if v_entrant_id is not null then\n    select count(*)::integer into v_active_sessions from public.participant_sessions\n     where meeting_uuid=p->>'meetingUuid' and entrant_id=v_entrant_id and active;\n  end if;\n  return jsonb_build_object('ok',true,'duplicate',false,'matchedEntrant',v_entrant_id is not null,'entrantId',v_entrant_id,'isStaff',v_is_staff,'activeSessions',v_active_sessions);\nend; $$;\n\ncreate or replace function public.api_get_status(p jsonb)\nreturns jsonb language plpgsql stable as $$\ndeclare v_uuid text; v_lock public.giveaway_locks%rowtype;\nbegin\n  v_uuid:=coalesce(nullif(p->>'meetingUuid',''),(select ps.meeting_uuid from public.participant_sessions ps where ps.meeting_id=p->>'meetingId' order by ps.last_event_at desc limit 1));\n  select * into v_lock from public.giveaway_locks where meeting_uuid=v_uuid limit 1;\n  return jsonb_build_object(\n   'ok',true,'meetingId',p->>'meetingId','meetingUuid',v_uuid,\n   'registered',(select count(*) from public.entrants e where e.meeting_id=p->>'meetingId'),\n   'connectedSessions',(select count(*) from public.participant_sessions ps where ps.meeting_uuid=v_uuid and ps.active),\n   'identifiedEntrants',(select count(distinct ps.entrant_id) from public.participant_sessions ps where ps.meeting_uuid=v_uuid and ps.active and ps.entrant_id is not null and not ps.is_staff),\n   'staffConnected',(select count(distinct ps.participant_uuid) from public.participant_sessions ps where ps.meeting_uuid=v_uuid and ps.active and ps.is_staff),\n   'unmatchedParticipants',(select count(distinct ps.participant_uuid) from public.participant_sessions ps where ps.meeting_uuid=v_uuid and ps.active and ps.entrant_id is null and not ps.is_staff),\n   'currentlyEligible',(select count(distinct e.id) from public.entrants e where e.meeting_id=p->>'meetingId' and not e.disqualified\n       and exists(select 1 from public.participant_sessions ps where ps.meeting_uuid=v_uuid and ps.entrant_id=e.id and ps.active and not ps.is_staff)\n       and not exists(select 1 from public.staff s where s.meeting_id=p->>'meetingId' and s.active and ((s.email is not null and lower(s.email)=lower(e.email)) or (s.zoom_registrant_id is not null and s.zoom_registrant_id=e.zoom_registrant_id)))),\n   'locked',v_lock.id is not null,'lockId',v_lock.id,'lockedAt',v_lock.locked_at,'eligibleCount',coalesce(v_lock.eligible_count,0),'sheetUrl',v_lock.sheet_url);\nend; $$;\n\ncreate or replace function public.api_lock_giveaway(p jsonb)\nreturns jsonb language plpgsql as $$\ndeclare v_lock public.giveaway_locks%rowtype; v_count integer; v_entries jsonb; v_existing boolean:=false;\nbegin\n  if coalesce(p->>'meetingId','')='' or coalesce(p->>'meetingUuid','')='' then\n    return jsonb_build_object('ok',false,'error','meetingId and meetingUuid are required.');\n  end if;\n  perform pg_advisory_xact_lock(hashtext(p->>'meetingUuid'));\n  select * into v_lock from public.giveaway_locks where meeting_uuid=p->>'meetingUuid' limit 1;\n  if found then v_existing:=true;\n  else\n    insert into public.giveaway_locks(meeting_id,meeting_uuid,requested_by)\n    values(p->>'meetingId',p->>'meetingUuid',coalesce(nullif(p->>'requestedBy',''),'creator-dashboard')) returning * into v_lock;\n\n    with eligible as (\n      select e.id entrant_id,e.serial_no,e.full_name,public.mask_email(e.email) masked_email,max(ps.last_event_at) present_at\n      from public.entrants e join public.participant_sessions ps on ps.entrant_id=e.id and ps.meeting_uuid=p->>'meetingUuid' and ps.active and not ps.is_staff\n      where e.meeting_id=p->>'meetingId' and not e.disqualified\n       and not exists(select 1 from public.staff s where s.meeting_id=p->>'meetingId' and s.active and ((s.email is not null and lower(s.email)=lower(e.email)) or (s.zoom_registrant_id is not null and s.zoom_registrant_id=e.zoom_registrant_id)))\n      group by e.id,e.serial_no,e.full_name,e.email\n    ), numbered as (\n      select row_number() over(order by serial_no)::integer draw_number,* from eligible\n    )\n    insert into public.giveaway_lock_entries(lock_id,draw_number,entrant_id,serial_no,full_name,masked_email,present_at)\n    select v_lock.id,draw_number,entrant_id,serial_no,full_name,masked_email,present_at from numbered;\n\n    select count(*)::integer into v_count from public.giveaway_lock_entries where lock_id=v_lock.id;\n    if v_count=0 then\n      delete from public.giveaway_locks where id=v_lock.id;\n      return jsonb_build_object('ok',false,'error','No eligible registered attendees are currently present.');\n    end if;\n    update public.giveaway_locks set eligible_count=v_count where id=v_lock.id returning * into v_lock;\n  end if;\n\n  select coalesce(jsonb_agg(jsonb_build_object('drawNumber',le.draw_number,'serialNo',le.serial_no,'fullName',le.full_name,'maskedEmail',le.masked_email,'presentAt',le.present_at) order by le.draw_number),'[]'::jsonb)\n  into v_entries from public.giveaway_lock_entries le where le.lock_id=v_lock.id;\n  return jsonb_build_object('ok',true,'lockId',v_lock.id,'alreadyLocked',v_existing,'meetingId',v_lock.meeting_id,'meetingUuid',v_lock.meeting_uuid,\n    'lockedAt',v_lock.locked_at,'eligibleCount',v_lock.eligible_count,'sheetId',v_lock.sheet_id,'sheetTitle',v_lock.sheet_title,'sheetUrl',v_lock.sheet_url,'entries',v_entries);\nend; $$;\n\ncreate or replace function public.api_attach_sheet(p jsonb)\nreturns jsonb language plpgsql as $$\ndeclare v_lock public.giveaway_locks%rowtype;\nbegin\n  update public.giveaway_locks set sheet_id=coalesce(sheet_id,p->>'sheetId'),sheet_title=coalesce(sheet_title,p->>'sheetTitle'),sheet_url=coalesce(sheet_url,p->>'sheetUrl')\n  where id=(p->>'lockId')::uuid returning * into v_lock;\n  if v_lock.id is null then return jsonb_build_object('ok',false,'error','Giveaway lock not found.'); end if;\n  return jsonb_build_object('ok',true,'lockId',v_lock.id,'eligibleCount',v_lock.eligible_count,'lockedAt',v_lock.locked_at,'sheetId',v_lock.sheet_id,'sheetTitle',v_lock.sheet_title,'sheetUrl',v_lock.sheet_url);\nend; $$;\n\ncreate or replace function public.api_seed_demo(p jsonb)\nreturns jsonb language plpgsql as $$\ndeclare v_meeting text:=coalesce(nullif(p->>'meetingId',''),'DEMO-MEETING-001'); v_uuid text:=coalesce(nullif(p->>'meetingUuid',''),'demo-live-001'); i integer;\nbegin\n  delete from public.giveaway_lock_entries where lock_id in (select id from public.giveaway_locks where meeting_uuid=v_uuid);\n  delete from public.giveaway_locks where meeting_uuid=v_uuid;\n  delete from public.participant_sessions where meeting_uuid=v_uuid;\n  delete from public.zoom_events where meeting_uuid=v_uuid;\n  delete from public.entrants where meeting_id=v_meeting;\n  delete from public.staff where meeting_id=v_meeting;\n  delete from public.meeting_counters where meeting_id=v_meeting;\n  for i in 1..25 loop\n    insert into public.entrants(meeting_id,serial_no,full_name,email,zoom_registrant_id,join_url,source)\n    values(v_meeting,i,'Demo Entrant '||lpad(i::text,2,'0'),'entrant'||lpad(i::text,2,'0')||'@example.com','demo-registrant-'||lpad(i::text,2,'0'),\n      'https://zoom.example.invalid/j/'||v_meeting||'?tk=demo-'||lpad(i::text,2,'0'),'demo-seed');\n  end loop;\n  insert into public.meeting_counters(meeting_id,last_serial) values(v_meeting,25);\n  insert into public.staff(meeting_id,full_name,email,zoom_user_id,role) values\n    (v_meeting,'Creator / Host','creator@example.com','zoom-host-001','host'),\n    (v_meeting,'Community Moderator','moderator@example.com','zoom-mod-001','moderator'),\n    (v_meeting,'Stream Producer','producer@example.com','zoom-producer-001','producer');\n  return jsonb_build_object('ok',true,'meetingId',v_meeting,'meetingUuid',v_uuid,'entrants',25,'staff',3);\nend; $$;\n\ncreate or replace function public.api_demo_attendance(p jsonb)\nreturns jsonb language plpgsql as $$\ndeclare v_meeting text:=coalesce(nullif(p->>'meetingId',''),'DEMO-MEETING-001'); v_uuid text:=coalesce(nullif(p->>'meetingUuid',''),'demo-live-001'); v_action text:=p->>'action';\nbegin\n  if v_action='reset' then\n    delete from public.participant_sessions where meeting_uuid=v_uuid;\n  elsif v_action='join_entrants' then\n    insert into public.participant_sessions(meeting_uuid,participant_uuid,meeting_id,entrant_id,registrant_id,email,participant_name,is_staff,active,joined_at,last_event_at)\n    select v_uuid,'demo-entrant-'||lpad(e.serial_no::text,2,'0'),v_meeting,e.id,e.zoom_registrant_id,e.email,e.full_name,false,true,now(),now()\n    from public.entrants e where e.meeting_id=v_meeting\n    on conflict(meeting_uuid,participant_uuid) do update set active=true,left_at=null,last_event_at=now();\n  elsif v_action='join_staff' then\n    insert into public.participant_sessions(meeting_uuid,participant_uuid,meeting_id,zoom_user_id,email,participant_name,is_staff,active,joined_at,last_event_at)\n    select v_uuid,'demo-staff-'||row_number() over(order by s.role),v_meeting,s.zoom_user_id,s.email,s.full_name,true,true,now(),now()\n    from public.staff s where s.meeting_id=v_meeting and s.active\n    on conflict(meeting_uuid,participant_uuid) do update set active=true,left_at=null,last_event_at=now();\n  elsif v_action='leave_five' then\n    update public.participant_sessions ps set active=false,left_at=now(),last_event_at=now()\n    from public.entrants e where ps.meeting_uuid=v_uuid and ps.entrant_id=e.id and e.meeting_id=v_meeting and e.serial_no>20;\n  else\n    return jsonb_build_object('ok',false,'error','Unknown demo action.');\n  end if;\n  return public.api_get_status(jsonb_build_object('meetingId',v_meeting,'meetingUuid',v_uuid));\nend; $$;",
+        "options": {
+          "queryBatching": "single",
+          "largeNumbersOutput": "text"
+        }
+      },
+      "id": "5bb4bdb2-0180-5b24-a617-6263f2aa4563",
+      "name": "Install or Upgrade Database",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -860,
+        -200
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "182ac9a6-d33b-531c-8425-fc0890cadb9d",
+              "name": "ok",
+              "value": "={{true}}",
+              "type": "boolean"
+            },
+            {
+              "id": "047c58d0-df64-5841-8072-55df34edd57b",
+              "name": "message",
+              "value": "Database tables and functions are installed.",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      },
+      "id": "4e0a5b83-7c67-51a7-b2b6-ae7820e5183f",
+      "name": "Database Setup Complete",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -600,
+        -200
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "8ed28461-c084-52fb-b4c5-2d12ff5136ac",
+      "name": "DEMO — Reset & Seed 25 Entrants",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1120,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "5e5a9b7a-5194-57a3-af27-963175c50d29",
+              "name": "meetingId",
+              "value": "DEMO-MEETING-001",
+              "type": "string"
+            },
+            {
+              "id": "344f7ca5-c626-5185-a940-8cc4f8e500f9",
+              "name": "meetingUuid",
+              "value": "demo-live-001",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      },
+      "id": "1b46754c-8d48-55a0-9b50-51b3b69e5ac7",
+      "name": "Demo Seed Configuration",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        -860,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT public.api_seed_demo($1::jsonb) AS result;",
+        "options": {
+          "queryBatching": "single",
+          "largeNumbersOutput": "text",
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "id": "b92c9acb-2b74-5b90-82ad-0975b6222cc1",
+      "name": "Seed Demo Entrants and Staff",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -600,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "return [{json:$json.result ?? $json}];"
+      },
+      "id": "0be5c4ba-c416-5e1c-a3fc-f61130bb7574",
+      "name": "Show Demo Seed Result",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -340,
+        420
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "zoom-giveaway/register",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "abf1f9ee-4d50-53d5-85d3-02d6bfee7e2f",
+      "name": "Registration Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        -1120,
+        80
+      ],
+      "webhookId": "8566e32f-0b33-5f7f-a0c1-a42a20343a2a"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const input = $json.body ?? $json;\nconst firstName = String(input.firstName ?? input.first_name ?? '').trim();\nconst lastName = String(input.lastName ?? input.last_name ?? '').trim();\nconst fullName = String(input.fullName ?? input.name ?? `${firstName} ${lastName}`).trim().replace(/\\s+/g,' ');\nconst email = String(input.email ?? '').trim().toLowerCase();\nconst meetingId = String(input.meetingId ?? input.meeting_id ?? '').replace(/\\s/g,'');\nconst errors=[];\nif (fullName.length<2) errors.push('A valid full name is required.');\nif (!/^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/.test(email)) errors.push('A valid email is required.');\nif (!meetingId) errors.push('meetingId is required.');\nreturn [{json:{ok:errors.length===0,errors,firstName:firstName||fullName.split(' ')[0],lastName:lastName||fullName.split(' ').slice(1).join(' '),fullName,email,meetingId,source:String(input.source??'registration-webhook').slice(0,80)}}];"
+      },
+      "id": "58a70a01-b747-5080-b0cd-c2a97a67f7e0",
+      "name": "Validate Registration",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -860,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "5e2bbb6d-7eab-536a-ba8b-f89821d3f415",
+              "leftValue": "={{$json.ok}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "221c556c-0568-5717-8c38-5c3469e2ab75",
+      "name": "Registration Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -600,
+        80
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {ok:false,errors:$json.errors} }}",
+        "options": {
+          "responseCode": 400,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "d064548f-1161-5c7c-a0e9-2b0d6c6a4dd3",
+      "name": "Return Validation Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        -340,
+        220
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT public.api_find_entrant($1::jsonb) AS result;",
+        "options": {
+          "queryBatching": "single",
+          "largeNumbersOutput": "text",
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "id": "07d8dba8-8d34-5991-9cdd-73398bd2aeae",
+      "name": "Find Existing Entrant",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        -340,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "e1359475-da16-599b-9d4d-96515b93687a",
+              "leftValue": "={{Boolean($json.result?.id)}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8a6ba1f6-8652-59fd-a035-e5d233196720",
+      "name": "Already Registered?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -80,
+        20
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "0bc212c6-7c24-5de7-9f61-5db1ea151edd",
+              "name": "ok",
+              "value": "={{true}}",
+              "type": "boolean"
+            },
+            {
+              "id": "457c13f7-3c44-5d01-966e-92c6a2d7ed23",
+              "name": "duplicate",
+              "value": "={{true}}",
+              "type": "boolean"
+            },
+            {
+              "id": "603b2b44-953b-5e29-8f51-73ef23d8559f",
+              "name": "message",
+              "value": "This email is already registered.",
+              "type": "string"
+            },
+            {
+              "id": "65b86034-58c5-5037-90a0-3d66ab7ee547",
+              "name": "entrantId",
+              "value": "={{$json.result.id}}",
+              "type": "string"
+            },
+            {
+              "id": "652dfe8a-53bb-598b-a534-1c7fd19fdb91",
+              "name": "serialNo",
+              "value": "={{Number($json.result.serial_no)}}",
+              "type": "number"
+            },
+            {
+              "id": "cb42413c-b46b-5db1-9619-e3aef951a20f",
+              "name": "fullName",
+              "value": "={{$json.result.full_name}}",
+              "type": "string"
+            },
+            {
+              "id": "9e65d158-5d03-52d9-8009-ad27d7503994",
+              "name": "email",
+              "value": "={{$json.result.email}}",
+              "type": "string"
+            },
+            {
+              "id": "5999e9a9-e68f-578b-ab28-ec97ab131ec7",
+              "name": "joinUrl",
+              "value": "={{$json.result.join_url}}",
+              "type": "string"
+            },
+            {
+              "id": "6ba3ccb1-a424-5c80-889f-12b0f1a44104",
+              "name": "zoomRegistrantId",
+              "value": "={{$json.result.zoom_registrant_id}}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      },
+      "id": "e69eeb20-f1c4-59a2-b446-4e85d53d75f8",
+      "name": "Format Existing Entrant",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        180,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {
+          "responseCode": 200,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "1914bf5e-2a85-5da5-9e04-886db8859c79",
+      "name": "Return Existing Registration",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        440,
+        -100
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{'https://api.zoom.us/v2/meetings/' + encodeURIComponent($('Validate Registration').first().json.meetingId) + '/registrants'}}",
+        "options": {
+          "timeout": 30000,
+          "response": {
+            "response": {
+              "neverError": false,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "zoomOAuth2Api",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({email:$('Validate Registration').first().json.email,first_name:$('Validate Registration').first().json.firstName,last_name:$('Validate Registration').first().json.lastName}) }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        }
+      },
+      "id": "d8150143-2210-5eea-a9ac-46c686116bb6",
+      "name": "Zoom — Add Meeting Registrant",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        180,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "const base=$('Validate Registration').first().json;\nconst zoom=$json;\nconst zoomRegistrantId=String(zoom.registrant_id ?? zoom.id ?? '');\nconst joinUrl=String(zoom.join_url ?? '');\nreturn [{json:{ok:Boolean(zoomRegistrantId&&joinUrl),error:(!zoomRegistrantId||!joinUrl)?'Zoom did not return both registrant_id and join_url.':null,meetingId:base.meetingId,fullName:base.fullName,email:base.email,source:base.source,zoomRegistrantId,joinUrl}}];"
+      },
+      "id": "a0df2cb3-f235-525d-a950-7c235f5d0826",
+      "name": "Build Entrant Database Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        440,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "16558550-943e-5aed-b12c-2b39a3f258ec",
+              "leftValue": "={{$json.ok}}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "1dfc82d6-e97a-55f3-b5b3-ff438598b525",
+      "name": "Zoom Registration Succeeded?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        700,
+        100
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ {ok:false,error:$json.error} }}",
+        "options": {
+          "responseCode": 502,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "f830cd8b-87e3-5a87-926f-3f3518f989eb",
+      "name": "Return Zoom Registration Error",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        960,
+        240
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT public.api_register_entrant($1::jsonb) AS result;",
+        "options": {
+          "queryBatching": "single",
+          "largeNumbersOutput": "text",
+          "queryReplacement": "={{ JSON.stringify($json) }}"
+        }
+      },
+      "id": "74f2c80f-c96e-510d-8c5a-6062d6c8bc2d",
+      "name": "Save Entrant & Allocate Serial",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        960,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "1c2377ae-6177-5d69-b12e-18334e67b2f7",
+              "name": "ok",
+              "value": "={{true}}",
+              "type": "boolean"
+            },
+            {
+              "id": "5b7c85bd-a2e5-502a-b123-5d0074260751",
+              "name": "duplicate",
+              "value": "={{false}}",
+              "type": "boolean"
+            },
+            {
+              "id": "7aeecf91-a8da-5980-9f3a-f159f2006c53",
+              "name": "message",
+              "value": "Registration completed.",
+              "type": "string"
+            },
+            {
+              "id": "637b9fb0-0041-5968-bc6a-830a53ad24ee",
+              "name": "entrantId",
+              "value": "={{$json.result.id}}",
+              "type": "string"
+            },
+            {
+              "id": "92ccdcdd-62b6-5803-b890-79d0163033e0",
+              "name": "serialNo",
+              "value": "={{Number($json.result.serial_no)}}",
+              "type": "number"
+            },
+            {
+              "id": "9a6a0ddd-3d04-53c4-b504-ee8182ad7c7b",
+              "name": "fullName",
+              "value": "={{$json.result.full_name}}",
+              "type": "string"
+            },
+            {
+              "id": "3548529e-981d-598d-9dae-0fc58d59d35d",
+              "name": "email",
+              "value": "={{$json.result.email}}",
+              "type": "string"
+            },
+            {
+              "id": "09dd0f9f-cd37-5b3a-8268-2bdb92447c5d",
+              "name": "joinUrl",
+              "value": "={{$json.result.join_url}}",
+              "type": "string"
+            },
+            {
+              "id": "775c6cce-f4a4-52b8-b788-dcf9a1f233bd",
+              "name": "zoomRegistrantId",
+              "value": "={{$json.result.zoom_registrant_id}}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      },
+      "id": "2f83fb8a-5663-5af4-b3a8-6897e58d7481",
+      "name": "Format Registration Success",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1220,
+        60
+      ]
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{$json}}",
+        "options": {
+          "responseCode": 201,
+          "responseHeaders": {
+            "entries": [
+              {
+                "name": "Cache-Control",
+                "value": "no-store"
+              },
+              {
+                "name": "Access-Control-Allow-Origin",
+                "value": "*"
+              }
+            ]
+          }
+        }
+      },
+      "id": "d69eeef6-edea-5c1d-8d93-7818d6c6d9d9",
+      "name": "Return Registration Success",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1480,
+        60
+      ]
+    }
+  ],
+  "connections": {
+    "RUN ONCE — Install Database": {
+      "main": [
+        [
+          {
+            "node": "Install or Upgrade Database",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Install or Upgrade Database": {
+      "main": [
+        [
+          {
+            "node": "Database Setup Complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DEMO — Reset & Seed 25 Entrants": {
+      "main": [
+        [
+          {
+            "node": "Demo Seed Configuration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Demo Seed Configuration": {
+      "main": [
+        [
+          {
+            "node": "Seed Demo Entrants and Staff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Seed Demo Entrants and Staff": {
+      "main": [
+        [
+          {
+            "node": "Show Demo Seed Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registration Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate Registration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate Registration": {
+      "main": [
+        [
+          {
+            "node": "Registration Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Registration Valid?": {
+      "main": [
+        [
+          {
+            "node": "Find Existing Entrant",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Validation Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Existing Entrant": {
+      "main": [
+        [
+          {
+            "node": "Already Registered?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Already Registered?": {
+      "main": [
+        [
+          {
+            "node": "Format Existing Entrant",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Zoom — Add Meeting Registrant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Existing Entrant": {
+      "main": [
+        [
+          {
+            "node": "Return Existing Registration",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zoom — Add Meeting Registrant": {
+      "main": [
+        [
+          {
+            "node": "Build Entrant Database Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Entrant Database Payload": {
+      "main": [
+        [
+          {
+            "node": "Zoom Registration Succeeded?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Zoom Registration Succeeded?": {
+      "main": [
+        [
+          {
+            "node": "Save Entrant & Allocate Serial",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Return Zoom Registration Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Entrant & Allocate Serial": {
+      "main": [
+        [
+          {
+            "node": "Format Registration Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Registration Success": {
+      "main": [
+        [
+          {
+            "node": "Return Registration Success",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true
+  },
+  "versionId": "476b4cdf-4a8f-5c9b-b197-6fd9b8fbebda",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "tags": [
+    {
+      "name": "Zoom Giveaway Final"
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+# Never commit real secrets or local dashboard configuration.
+.env
+.env.*
+!.env.example
+**/config.js
+**/*credentials*
+**/*secret*
+!docs/SECURITY-AND-PRIVACY.md
+!docs/CREDENTIALS-CHECKLIST.md
+
+# Local and generated files.
+node_modules/
+dist/
+.DS_Store
+Thumbs.db
+*.log

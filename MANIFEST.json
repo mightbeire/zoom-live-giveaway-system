@@ -1,0 +1,161 @@
+{
+  "package": "zoom-live-giveaway",
+  "generated": "2026-07-12",
+  "files": [
+    {
+      "path": ".gitignore",
+      "sha256": "177201b02154b78407bb06bdf39f2ac2b9b88c00c58f103a748dc94ca349487d",
+      "bytes": 267
+    },
+    {
+      "path": "README.md",
+      "sha256": "aeeef0e02a346cebb607583226cf2b2f75272c53834fd4814383595afd529a04",
+      "bytes": 2673
+    },
+    {
+      "path": "assets/architecture-diagram.svg",
+      "sha256": "552ce21eaf876731ede8569b06daa6ec6e06c8dd4df3b769d94eeff1b138f614",
+      "bytes": 3063
+    },
+    {
+      "path": "dashboard/README.md",
+      "sha256": "f67fcfcafa2f03389f9006ca109b846b87d8ab8ca038d16fbff7079e758a8387",
+      "bytes": 923
+    },
+    {
+      "path": "dashboard/app.js",
+      "sha256": "4b323c14a1e981baa2a7fd8bd104c2019855b2ea428c6cb0643db54dbd5154d2",
+      "bytes": 4941
+    },
+    {
+      "path": "dashboard/config.example.js",
+      "sha256": "de49fd60c3447ea16c9b556ff4650fce4d38338f9265a92ea38776c2f5993deb",
+      "bytes": 502
+    },
+    {
+      "path": "dashboard/index.html",
+      "sha256": "26283a5ce18f82b6bad61d1372df0e40f29b48e62003154829995df96208832a",
+      "bytes": 4217
+    },
+    {
+      "path": "dashboard/styles.css",
+      "sha256": "14ea9003eee64e4fd8969ae34181afa628be2e5ba3514b1532ff8d4979c218bf",
+      "bytes": 4019
+    },
+    {
+      "path": "database/add-staff.example.sql",
+      "sha256": "daa6601c82a552200ea431d398da9fe3a019d55053f17ed3982b21481868314f",
+      "bytes": 664
+    },
+    {
+      "path": "database/schema.sql",
+      "sha256": "fd11662ab74eead2cba111c6ed6a59e024d3270ea70e851a1d2434bba9d7cefa",
+      "bytes": 18253
+    },
+    {
+      "path": "demo/demo-script.md",
+      "sha256": "b5609c4c28ec79780f8b64ac4a257d5191c24da6c8879d5fd87ee8cc9ef0db53",
+      "bytes": 1646
+    },
+    {
+      "path": "demo/mock-registrants.csv",
+      "sha256": "0084960d40f5af6d39a04cd2d79f1b3757038c60aba95f791a39a20cd2b24e8e",
+      "bytes": 1683
+    },
+    {
+      "path": "demo/recording-checklist.md",
+      "sha256": "b7e4a6df4c4b2ff05544f4daae0ba11392e27b3099e6b0c1c615f92648aa1d7e",
+      "bytes": 523
+    },
+    {
+      "path": "demo/sample-payloads/registration.json",
+      "sha256": "c378cf7f7340e759d9154bcac3fa3db67900a81c4390dea53771539dfb55a7dd",
+      "bytes": 130
+    },
+    {
+      "path": "demo/sample-payloads/zoom-participant-joined.json",
+      "sha256": "186884759cc3196251a9abc14b4f44af0a5a78ecf3e6ca744a4b27b84226bfd7",
+      "bytes": 492
+    },
+    {
+      "path": "demo/sample-payloads/zoom-participant-left.json",
+      "sha256": "77a3d56391e806890ee429d5fe6797717e1d312582fded67c5ab4fe6c95e8cc4",
+      "bytes": 491
+    },
+    {
+      "path": "docs/CREDENTIALS-CHECKLIST.md",
+      "sha256": "50e0c91fb795a76361eb09a290d327c90d2980ec0079ef1182166644aaaa17cd",
+      "bytes": 862
+    },
+    {
+      "path": "docs/HOW-IT-WORKS.md",
+      "sha256": "9f1a2f1ddf1bd67bd2f67f0651d199fbbf71a025b2f02691c9c3f2c62c766377",
+      "bytes": 2215
+    },
+    {
+      "path": "docs/IMPLEMENTATION-STATUS.md",
+      "sha256": "341e104f498485aaa1c0e50a15f1d38ce73a2a4472d2b8fbf5baf7d0d7fcd8ad",
+      "bytes": 2043
+    },
+    {
+      "path": "docs/RUNNING-THE-GIVEAWAY.md",
+      "sha256": "6650ef2f496a53c51f07fb51f4ce44a7a5752b62c03d088ee7bfa833f05773af",
+      "bytes": 2202
+    },
+    {
+      "path": "docs/SECURITY-AND-PRIVACY.md",
+      "sha256": "6fb935e2629013252717a1618c31730ca2c18709e0cfd680141fdc50339100f1",
+      "bytes": 1620
+    },
+    {
+      "path": "docs/SOURCES.md",
+      "sha256": "3e1a072c085b5a440303cc3c669d20ab8ebb6d968a7abbaef469abbb7f9d14bf",
+      "bytes": 1423
+    },
+    {
+      "path": "docs/START-HERE.md",
+      "sha256": "abc35add4b40b5c9d77c4a753bf612636f31ea826904711928c8e251cf661076",
+      "bytes": 2856
+    },
+    {
+      "path": "docs/TECHNICAL-SETUP.md",
+      "sha256": "f7f57094373d451550282330be05cd421dbe1567348dfdd2dc9bc91f26f5b2ac",
+      "bytes": 5219
+    },
+    {
+      "path": "docs/TESTING.md",
+      "sha256": "5f1859d63933f7ac7d9842850ead18273c42e3d61a37af18e662d5ecd97b4c33",
+      "bytes": 2988
+    },
+    {
+      "path": "docs/TROUBLESHOOTING.md",
+      "sha256": "8b0d6c9bd6a861645cd1e3ecb32173ef1796a979ca56144c11d76ea5d941a481",
+      "bytes": 2584
+    },
+    {
+      "path": "docs/WORKFLOW-GUIDE.md",
+      "sha256": "0a325b8a161c14f2e22f53718b02d17b848a64842e579ecff3a587c2f062b657",
+      "bytes": 3178
+    },
+    {
+      "path": "workflows/01-registration-setup-demo.json",
+      "sha256": "e05bf3575a9bf319c18b4b2ef969a6ce063b1c26a0b6e515a605490b4ed0f4f8",
+      "bytes": 42436
+    },
+    {
+      "path": "workflows/02-attendance-demo.json",
+      "sha256": "4cf82d24680e31fabeb389f2213a7ddee2fba3dfb6f99eaac883d0eb762fa01e",
+      "bytes": 25956
+    },
+    {
+      "path": "workflows/03-status-lock-google-sheet.json",
+      "sha256": "f6f10f5ca782875138c00b59e13ef5b784cf5cc8b1dd0cfc5627db9fdb230e23",
+      "bytes": 34740
+    },
+    {
+      "path": "workflows/STRUCTURAL-VALIDATION.json",
+      "sha256": "800417cd1a9072e1560082aeda011a2f99cfacd8474a5d8adb35c0b69da447a3",
+      "bytes": 1753
+    }
+  ]
+}

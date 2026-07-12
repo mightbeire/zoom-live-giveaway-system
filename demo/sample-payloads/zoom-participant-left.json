@@ -1,0 +1,19 @@
+{
+  "event": "meeting.participant_left",
+  "event_ts": 1783800900000,
+  "payload": {
+    "account_id": "example-account",
+    "object": {
+      "id": "123456789",
+      "uuid": "example-meeting-uuid",
+      "participant": {
+        "participant_uuid": "participant-session-01",
+        "registrant_id": "registrant-01",
+        "user_id": "zoom-user-01",
+        "user_name": "Ada Okafor",
+        "email": "ada@example.com",
+        "leave_time": "2026-07-12T18:15:00Z"
+      }
+    }
+  }
+}
