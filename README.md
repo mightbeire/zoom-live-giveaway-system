@@ -1,3 +1,5 @@
+
+> **Implementation status:** The architecture, workflows, database schema and demo are complete. The system has not been tested with Anthony’s live Zoom credentials. Production deployment requires credential connection and a private rehearsal.
 # Zoom Live Giveaway
 
 This project makes sure that only registered people who are still present in a Zoom livestream can enter a giveaway.
